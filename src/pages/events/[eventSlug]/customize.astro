@@ -1,0 +1,583 @@
+---
+import '../../../styles/global.css';
+import { getEventBySlug } from '../../../../data/events';
+import PreviewPane from '../../../components/customize/PreviewPane.astro';
+import EditorPanel from '../../../components/customize/EditorPanel.astro';
+
+const eventSlug = Astro.params.eventSlug ?? '';
+const event = getEventBySlug(eventSlug);
+
+if (!event) {
+  return Astro.redirect('/');
+}
+
+const requestedFrameId = Astro.url.searchParams.get('frameId') ?? '';
+const selectedFrame =
+  event.frames.find((frame) => frame.id === requestedFrameId) ?? event.frames[0];
+
+const pageTitle = `Customize | ${event.title} | DP Blast`;
+---
+
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{pageTitle}</title>
+  </head>
+  <body class="relative min-h-screen overflow-x-hidden bg-[#f8f9fa] font-['Outfit','Segoe_UI',sans-serif] text-[#202124] [--nav-h:4.5rem] max-sm:[--nav-h:4rem]">
+    <div class="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+      <div class="absolute left-[12%] top-[18%] h-36 w-36 rounded-full bg-[#4285f4]/15 blur-3xl"></div>
+      <div class="absolute right-[8%] top-[12%] h-28 w-28 rounded-full bg-[#fbbc04]/12 blur-2xl"></div>
+      <div class="absolute bottom-[16%] right-[12%] h-40 w-40 rounded-full bg-[#34a853]/12 blur-3xl"></div>
+    </div>
+
+    <header class="sticky top-0 z-20 h-(--nav-h) border-b border-gray-200/90 bg-white/85 px-[clamp(1rem,3vw,2.5rem)] backdrop-blur-md max-sm:px-3.5">
+      <div class="mx-auto flex h-full w-full max-w-7xl items-center justify-between">
+        <a class="inline-flex items-center no-underline" href="/" aria-label="GDG Frames home">
+          <img src="/gdg-logo.svg" alt="GDG Frames" class="h-10 w-auto max-sm:h-8" loading="eager" decoding="async" />
+        </a>
+        <a
+          class="inline-flex items-center justify-center rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-700 no-underline shadow-[0_8px_20px_rgba(17,24,39,0.07)] transition-transform duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] hover:-translate-y-0.5 hover:bg-gray-50"
+          href={`/events/${event.slug}`}
+        >
+          Back to uploader
+        </a>
+      </div>
+    </header>
+
+    <main class="relative z-2 py-8 max-sm:pb-30">
+      <section class="mx-auto w-full max-w-7xl px-4" aria-label="Customize your DP frame">
+        <div class="rounded-4xl border border-gray-200 bg-white p-4 shadow-[0_20px_60px_rgba(17,24,39,0.14)] md:p-7 lg:p-9">
+          <div class="grid gap-8 lg:grid-cols-[minmax(320px,480px)_1fr] lg:gap-12">
+            <PreviewPane frames={event.frames} selectedFrameId={selectedFrame.id} />
+            <EditorPanel eventTitle={event.title} />
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div
+      id="customize-config"
+      data-event-slug={event.slug}
+      data-caption-template={event.captionTemplate}
+      data-initial-frame-id={selectedFrame.id}
+      hidden
+      aria-hidden="true"
+    ></div>
+
+    <script is:inline>
+      // @ts-nocheck
+      const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+      const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+      const SESSION_IMAGE_KEY = 'dpblast-customize-image';
+
+      const initCustomizePage = ({ eventSlug, captionTemplate, initialFrameId }) => {
+        let selectedFrameId = initialFrameId;
+        let activePhotoImage = null;
+        let activeFrameImage = null;
+
+        const state = {
+          zoom: 1,
+          offsetX: 0,
+          offsetY: 0,
+          tiltDeg: 0,
+        };
+
+        const canvas = document.getElementById('preview-canvas');
+        const statusEl = document.getElementById('canvas-status');
+        const frameButtons = document.querySelectorAll('.customize-frame-btn');
+        const photoInput = document.getElementById('photo');
+        const resetButton = document.getElementById('reset-adjustments');
+        const downloadButton = document.getElementById('download-result');
+        const zoomOutQuickButton = document.getElementById('zoom-out-quick');
+        const zoomInQuickButton = document.getElementById('zoom-in-quick');
+        const rotateLeftQuickButton = document.getElementById('rotate-left-quick');
+        const rotateRightQuickButton = document.getElementById('rotate-right-quick');
+        const resetQuickButton = document.getElementById('reset-quick');
+
+        const zoomRange = document.getElementById('zoom-range');
+        const xRange = document.getElementById('x-range');
+        const yRange = document.getElementById('y-range');
+        const tiltRange = document.getElementById('tilt-range');
+
+        const zoomValue = document.getElementById('zoom-value');
+        const xValue = document.getElementById('x-value');
+        const yValue = document.getElementById('y-value');
+        const tiltValue = document.getElementById('tilt-value');
+
+        const captionNameInput = document.getElementById('caption-name');
+        const captionOutput = document.getElementById('caption-output');
+        const captionCopyButton = document.getElementById('caption-copy');
+        const captionStatus = document.getElementById('caption-status');
+
+        const ctx =
+          canvas instanceof HTMLCanvasElement ? canvas.getContext('2d') : null;
+
+        const setCanvasStatus = (message, isError = false) => {
+          if (!(statusEl instanceof HTMLParagraphElement)) return;
+          statusEl.textContent = message;
+          statusEl.className = isError
+            ? 'mt-3 text-sm text-red-600'
+            : 'mt-3 text-sm text-gray-600';
+        };
+
+        const updateValueLabels = () => {
+          if (zoomValue instanceof HTMLSpanElement)
+            zoomValue.textContent = `${state.zoom.toFixed(2)}x`;
+          if (xValue instanceof HTMLSpanElement)
+            xValue.textContent = `${Math.round(state.offsetX)}px`;
+          if (yValue instanceof HTMLSpanElement)
+            yValue.textContent = `${Math.round(state.offsetY)}px`;
+          if (tiltValue instanceof HTMLSpanElement)
+            tiltValue.textContent = `${Math.round(state.tiltDeg)}deg`;
+        };
+
+        const buildCaption = (nameValue) => {
+          const safeName = nameValue && nameValue.trim() ? nameValue.trim() : 'Your Name';
+          return captionTemplate.replaceAll('{{name}}', safeName);
+        };
+
+        const updateCaptionOutput = () => {
+          if (!(captionOutput instanceof HTMLTextAreaElement)) return;
+          const nameValue =
+            captionNameInput instanceof HTMLInputElement ? captionNameInput.value : '';
+          captionOutput.value = buildCaption(nameValue);
+        };
+
+        const setCaptionStatus = (message, isError = false) => {
+          if (!(captionStatus instanceof HTMLParagraphElement)) return;
+          captionStatus.textContent = message;
+          captionStatus.className = isError
+            ? 'm-0 text-sm text-red-600'
+            : 'm-0 text-sm text-gray-600';
+        };
+
+        const getRangeBounds = (input, fallbackMin, fallbackMax) => {
+          if (!(input instanceof HTMLInputElement)) {
+            return { min: fallbackMin, max: fallbackMax };
+          }
+
+          const min = Number(input.min);
+          const max = Number(input.max);
+
+          return {
+            min: Number.isFinite(min) ? min : fallbackMin,
+            max: Number.isFinite(max) ? max : fallbackMax,
+          };
+        };
+
+        const loadImage = (src) =>
+          new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error('image-load-failed'));
+            image.src = src;
+          });
+
+        const getFrameButtonById = (frameId) =>
+          Array.from(frameButtons).find((button) => {
+            return (
+              button instanceof HTMLButtonElement && button.dataset.frameId === frameId
+            );
+          });
+
+        const highlightFrame = (frameId) => {
+          frameButtons.forEach((button) => {
+            if (button instanceof HTMLButtonElement) {
+              button.classList.remove('ring-2', 'ring-[#4285f4]');
+              if (button.dataset.frameId === frameId) {
+                button.classList.add('ring-2', 'ring-[#4285f4]');
+              }
+            }
+          });
+        };
+
+        const renderCanvas = () => {
+          if (
+            !(canvas instanceof HTMLCanvasElement) ||
+            !ctx ||
+            !(activeFrameImage instanceof HTMLImageElement)
+          ) {
+            return;
+          }
+
+          const width = activeFrameImage.naturalWidth || 1080;
+          const height = activeFrameImage.naturalHeight || 1080;
+
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+
+          ctx.clearRect(0, 0, width, height);
+
+          if (activePhotoImage instanceof HTMLImageElement) {
+            const baseScale = Math.max(
+              width / activePhotoImage.naturalWidth,
+              height / activePhotoImage.naturalHeight,
+            );
+            const finalScale = baseScale * state.zoom;
+            const drawWidth = activePhotoImage.naturalWidth * finalScale;
+            const drawHeight = activePhotoImage.naturalHeight * finalScale;
+
+            ctx.save();
+            ctx.translate(width / 2 + state.offsetX, height / 2 + state.offsetY);
+            ctx.rotate((state.tiltDeg * Math.PI) / 180);
+            ctx.drawImage(
+              activePhotoImage,
+              -drawWidth / 2,
+              -drawHeight / 2,
+              drawWidth,
+              drawHeight,
+            );
+            ctx.restore();
+          } else {
+            ctx.fillStyle = '#e5e7eb';
+            ctx.fillRect(0, 0, width, height);
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '600 28px Outfit, Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Upload a photo to begin', width / 2, height / 2);
+          }
+
+          ctx.drawImage(activeFrameImage, 0, 0, width, height);
+        };
+
+        const setFrameFromButton = async (button) => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          const frameId = button.dataset.frameId;
+          const overlayPath = button.dataset.frameOverlay;
+          if (!frameId || !overlayPath) return;
+
+          selectedFrameId = frameId;
+          activeFrameImage = await loadImage(overlayPath);
+          highlightFrame(frameId);
+          renderCanvas();
+        };
+
+        const toDataUrl = (file) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (typeof reader.result === 'string') {
+                resolve(reader.result);
+              } else {
+                reject(new Error('invalid-data-url'));
+              }
+            };
+            reader.onerror = () => reject(new Error('file-read-failed'));
+            reader.readAsDataURL(file);
+          });
+
+        const readPersistedImage = () => {
+          try {
+            const raw = sessionStorage.getItem(SESSION_IMAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (parsed?.eventSlug !== eventSlug || typeof parsed?.dataUrl !== 'string') {
+              return null;
+            }
+            return parsed;
+          } catch {
+            return null;
+          }
+        };
+
+        const persistImage = (fileName, mimeType, dataUrl) => {
+          sessionStorage.setItem(
+            SESSION_IMAGE_KEY,
+            JSON.stringify({
+              eventSlug,
+              fileName,
+              mimeType,
+              dataUrl,
+            }),
+          );
+        };
+
+        const applyPhotoFromDataUrl = async (dataUrl) => {
+          activePhotoImage = await loadImage(dataUrl);
+          renderCanvas();
+        };
+
+        const bindRange = (input, apply) => {
+          if (!(input instanceof HTMLInputElement)) return;
+          input.addEventListener('input', () => {
+            apply(Number(input.value));
+            updateValueLabels();
+            renderCanvas();
+          });
+        };
+
+        const resetAdjustments = () => {
+          state.zoom = 1;
+          state.offsetX = 0;
+          state.offsetY = 0;
+          state.tiltDeg = 0;
+
+          if (zoomRange instanceof HTMLInputElement) zoomRange.value = '1';
+          if (xRange instanceof HTMLInputElement) xRange.value = '0';
+          if (yRange instanceof HTMLInputElement) yRange.value = '0';
+          if (tiltRange instanceof HTMLInputElement) tiltRange.value = '0';
+
+          updateValueLabels();
+          renderCanvas();
+        };
+
+        const applyZoomDelta = (delta) => {
+          const { min, max } = getRangeBounds(zoomRange, 0.5, 2.8);
+          const next = Math.min(max, Math.max(min, state.zoom + delta));
+          state.zoom = Number(next.toFixed(2));
+
+          if (zoomRange instanceof HTMLInputElement) {
+            zoomRange.value = state.zoom.toFixed(2);
+          }
+
+          updateValueLabels();
+          renderCanvas();
+        };
+
+        const applyTiltDelta = (delta) => {
+          const { min, max } = getRangeBounds(tiltRange, -180, 180);
+          const next = Math.min(max, Math.max(min, state.tiltDeg + delta));
+          state.tiltDeg = Math.round(next);
+
+          if (tiltRange instanceof HTMLInputElement) {
+            tiltRange.value = String(state.tiltDeg);
+          }
+
+          updateValueLabels();
+          renderCanvas();
+        };
+
+        const trackDownload = () => {
+          fetch('/api/analytics/download', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              eventSlug,
+              frameId: selectedFrameId,
+              sourcePath: window.location.pathname,
+            }),
+          }).catch(() => {
+            // Ignore analytics failures so download flow remains uninterrupted.
+          });
+        };
+
+        frameButtons.forEach((button) => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          button.addEventListener('click', async () => {
+            try {
+              await setFrameFromButton(button);
+              setCanvasStatus('Frame updated.');
+              const url = new URL(window.location.href);
+              url.searchParams.set('frameId', selectedFrameId);
+              window.history.replaceState({}, '', url.toString());
+            } catch {
+              setCanvasStatus('Could not switch frame. Please try again.', true);
+            }
+          });
+        });
+
+        bindRange(zoomRange, (value) => {
+          state.zoom = value;
+        });
+
+        bindRange(xRange, (value) => {
+          state.offsetX = value;
+        });
+
+        bindRange(yRange, (value) => {
+          state.offsetY = value;
+        });
+
+        bindRange(tiltRange, (value) => {
+          state.tiltDeg = value;
+        });
+
+        if (resetButton instanceof HTMLButtonElement) {
+          resetButton.addEventListener('click', () => {
+            resetAdjustments();
+            setCanvasStatus('Adjustments reset.');
+          });
+        }
+
+        if (zoomOutQuickButton instanceof HTMLButtonElement) {
+          zoomOutQuickButton.addEventListener('click', () => {
+            applyZoomDelta(-0.1);
+            setCanvasStatus('Zoom updated.');
+          });
+        }
+
+        if (zoomInQuickButton instanceof HTMLButtonElement) {
+          zoomInQuickButton.addEventListener('click', () => {
+            applyZoomDelta(0.1);
+            setCanvasStatus('Zoom updated.');
+          });
+        }
+
+        if (rotateLeftQuickButton instanceof HTMLButtonElement) {
+          rotateLeftQuickButton.addEventListener('click', () => {
+            applyTiltDelta(-5);
+            setCanvasStatus('Tilt updated.');
+          });
+        }
+
+        if (rotateRightQuickButton instanceof HTMLButtonElement) {
+          rotateRightQuickButton.addEventListener('click', () => {
+            applyTiltDelta(5);
+            setCanvasStatus('Tilt updated.');
+          });
+        }
+
+        if (resetQuickButton instanceof HTMLButtonElement) {
+          resetQuickButton.addEventListener('click', () => {
+            resetAdjustments();
+            setCanvasStatus('Adjustments reset.');
+          });
+        }
+
+        if (photoInput instanceof HTMLInputElement) {
+          photoInput.addEventListener('change', async () => {
+            const file = photoInput.files?.[0];
+            if (!file) return;
+
+            if (!ALLOWED_TYPES.has(file.type)) {
+              setCanvasStatus(
+                'Unsupported file type. Please use PNG, JPG, or WEBP.',
+                true,
+              );
+              return;
+            }
+
+            if (file.size > MAX_UPLOAD_BYTES) {
+              setCanvasStatus('File is too large. Maximum size is 10MB.', true);
+              return;
+            }
+
+            try {
+              const dataUrl = await toDataUrl(file);
+              await applyPhotoFromDataUrl(dataUrl);
+              persistImage(file.name, file.type, dataUrl);
+              setCanvasStatus('Photo loaded. Fine-tune and download when ready.');
+            } catch {
+              setCanvasStatus('Could not load the selected photo.', true);
+            }
+          });
+        }
+
+        if (downloadButton instanceof HTMLButtonElement) {
+          downloadButton.addEventListener('click', () => {
+            if (!(canvas instanceof HTMLCanvasElement)) return;
+
+            if (!(activePhotoImage instanceof HTMLImageElement)) {
+              setCanvasStatus('Upload a photo before downloading.', true);
+              return;
+            }
+
+            canvas.toBlob((blob) => {
+              if (!blob) {
+                setCanvasStatus('Download failed. Please try again.', true);
+                return;
+              }
+
+              const blobUrl = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = blobUrl;
+              anchor.download = `${eventSlug}-${selectedFrameId}-custom.png`;
+              document.body.appendChild(anchor);
+              anchor.click();
+              document.body.removeChild(anchor);
+              URL.revokeObjectURL(blobUrl);
+              trackDownload();
+              setCanvasStatus('Download started.');
+            }, 'image/png');
+          });
+        }
+
+        if (captionNameInput instanceof HTMLInputElement) {
+          captionNameInput.addEventListener('input', () => {
+            updateCaptionOutput();
+            setCaptionStatus('Caption is ready.');
+          });
+        }
+
+        if (captionCopyButton instanceof HTMLButtonElement) {
+          captionCopyButton.addEventListener('click', async () => {
+            if (!(captionOutput instanceof HTMLTextAreaElement)) return;
+
+            const textToCopy = captionOutput.value.trim();
+            if (!textToCopy) {
+              setCaptionStatus('Caption is empty. Please enter your name first.', true);
+              return;
+            }
+
+            try {
+              if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(textToCopy);
+              } else {
+                captionOutput.focus();
+                captionOutput.select();
+                const copied = document.execCommand('copy');
+                if (!copied) {
+                  throw new Error('copy-failed');
+                }
+              }
+              setCaptionStatus('Caption copied. You can paste it now.');
+            } catch {
+              setCaptionStatus('Copy failed. Please select and copy manually.', true);
+            }
+          });
+        }
+
+        const bootstrap = async () => {
+          const initialFrameButton = getFrameButtonById(selectedFrameId);
+          const fallbackButton = frameButtons[0];
+
+          try {
+            if (initialFrameButton instanceof HTMLButtonElement) {
+              await setFrameFromButton(initialFrameButton);
+            } else if (fallbackButton instanceof HTMLButtonElement) {
+              await setFrameFromButton(fallbackButton);
+            }
+
+            const persisted = readPersistedImage();
+            if (persisted?.dataUrl) {
+              await applyPhotoFromDataUrl(persisted.dataUrl);
+              setCanvasStatus('Loaded your selected photo. Adjust and download when ready.');
+            } else {
+              renderCanvas();
+              setCanvasStatus('Upload a photo to start customizing.');
+            }
+          } catch {
+            setCanvasStatus('Could not initialize customization controls.', true);
+          }
+        };
+
+        updateValueLabels();
+        updateCaptionOutput();
+        bootstrap();
+      };
+
+      const configEl = document.getElementById('customize-config');
+      const eventSlug = configEl?.getAttribute('data-event-slug') ?? '';
+      const captionTemplate = configEl?.getAttribute('data-caption-template') ?? '';
+      const initialFrameId = configEl?.getAttribute('data-initial-frame-id') ?? '';
+
+      if (!eventSlug || !captionTemplate || !initialFrameId) {
+        console.error('Customize page config is incomplete.');
+      } else {
+        initCustomizePage({
+          eventSlug,
+          captionTemplate,
+          initialFrameId,
+        });
+      }
+    </script>
+  </body>
+</html>
