@@ -9,7 +9,13 @@
 
 ## Product Summary
 
-DP Blast is a web app that takes a user-uploaded image, composites it with a selected transparent frame, and returns a processed output suitable for profile-picture use. The MVP should optimize for speed, simplicity, and reliable output quality over feature breadth.
+DP Blast is a web app that takes a user-uploaded image, composites it with a selected transparent frame for a chosen event or campaign, and returns a processed output suitable for profile-picture use. The MVP should optimize for speed, simplicity, and reliable output quality over feature breadth.
+
+Primary navigation model for MVP:
+
+1. Landing page lists all events that have available DP frames.
+2. Selecting an event routes the user to an event-specific uploader page using a slug route.
+3. Uploader context is scoped to the selected event, including frame choices and validation.
 
 ## Spec-Driven Development Rules
 
@@ -33,8 +39,15 @@ Each phase must complete the following before the next phase begins:
 1. Initial stack is Astro with React for interactive UI.
 2. Backend processing will run on Astro server routes using a Node adapter.
 3. Image compositing will use a server-side library such as Sharp.
-4. MVP will start with a fixed catalog of admin-provided frame assets.
+4. MVP will start with a fixed catalog of admin-provided events and frame assets.
 5. Anonymous usage is allowed in MVP.
+
+## Routing Model (MVP)
+
+1. Event discovery route: `/`.
+2. Event-specific uploader route: `/events/[eventSlug]`.
+3. Event slug must be unique, stable, URL-safe, and derived from event metadata.
+4. API requests for processing must include event context and a frame identifier.
 
 ## Phase 0: Foundation Spec
 
@@ -105,28 +118,35 @@ Backend infrastructure is proven working before any UI-dependent processing feat
 
 ### Goal
 
-Create a consistent system for storing and referencing frame assets.
+Create a consistent system for storing and referencing event campaigns and frame assets.
 
 ### Scope
 
-1. Define frame metadata schema.
-2. Prepare initial frame assets in transparent PNG format.
-3. Create thumbnails for the selection UI.
-4. Add a catalog source the frontend and backend can both trust.
+1. Define event metadata schema.
+2. Define frame metadata schema, including event linkage.
+3. Define event-to-frame mapping rules.
+4. Define event slug rules and uniqueness constraints.
+5. Prepare initial frame assets in transparent PNG format.
+6. Create thumbnails for the selection UI.
+7. Add a catalog source the frontend and backend can both trust.
 
 ### Deliverables
 
-1. Frame manifest file.
-2. Organized frame asset directory.
-3. Thumbnail assets.
-4. Validation rules for missing or malformed frame entries.
+1. Event manifest file.
+2. Frame manifest file.
+3. Documented slug field per event in manifest.
+4. Organized frame asset directory.
+5. Thumbnail assets.
+6. Validation rules for missing or malformed event or frame entries.
 
 ### Acceptance Criteria
 
-1. Each frame has a unique ID, display name, preview asset, and full overlay asset.
-2. Frame dimensions match the expected compositing canvas rules.
-3. The frontend can render the catalog without hardcoded per-frame logic.
-4. The backend can resolve a frame by ID with no ambiguous mapping.
+1. Each event has a unique ID and display metadata.
+2. Each frame has a unique ID, display name, preview asset, full overlay asset, and linked event ID.
+3. Frame dimensions match the expected compositing canvas rules.
+4. The frontend can render event and frame catalogs without hardcoded per-item logic.
+5. The backend can resolve a valid event and frame combination with no ambiguous mapping.
+6. Event slugs map deterministically to event entries with no collisions.
 
 ### Exit Gate
 
@@ -140,26 +160,31 @@ Let users submit a valid photo and chosen frame safely and reliably.
 
 ### Scope
 
-1. Build upload UI with drag-and-drop and file picker support.
-2. Add frame selection UI.
-3. Add client-side validation for type and size.
-4. Add server-side validation for MIME type, dimensions, and frame ID.
-5. Define error states and retry paths.
+1. Build event browsing UI on landing page, listing events with available frames.
+2. Add routing from landing to event-specific uploader via `/events/[eventSlug]`.
+3. Build upload UI on event uploader with drag-and-drop and file picker support.
+4. Add frame selection UI filtered by selected event slug.
+5. Add client-side validation for type, size, event slug, and frame ID.
+6. Add server-side validation for MIME type, dimensions, event slug, and frame ID.
+7. Define error states and retry paths.
 
 ### Deliverables
 
-1. Upload form component.
-2. Frame picker component.
-3. API contract for submission.
-4. Validation utilities shared where appropriate.
-5. Error copy for user-visible failures.
+1. Event listing component for landing page.
+2. Event uploader page routed by slug.
+3. Upload form component.
+4. Frame picker component scoped to route event.
+5. API contract for submission including event slug and frame identifier.
+6. Validation utilities shared where appropriate.
+7. Error copy for user-visible failures.
 
 ### Acceptance Criteria
 
 1. Supported files submit successfully.
 2. Invalid files are rejected with clear messages.
-3. No processing occurs for unsupported file types or invalid frame IDs.
+3. No processing occurs for unsupported file types, invalid event IDs, invalid frame IDs, or invalid event-frame combinations.
 4. The form is usable on desktop and mobile.
+5. Landing event cards route to the correct event uploader slug page.
 
 ### Exit Gate
 
@@ -202,7 +227,7 @@ The core product promise is met with repeatable output quality.
 
 ### Goal
 
-Give users confidence in the result and a simple way to save it.
+Give users confidence in the result and a complete post-processing experience that supports download, sharing, and event caption reuse.
 
 ### Scope
 
@@ -211,6 +236,10 @@ Give users confidence in the result and a simple way to save it.
 3. Provide download action.
 4. Provide reset and retry actions.
 5. Handle mobile-friendly download behavior.
+6. Route users to a dedicated customization page after upload handoff.
+7. Provide manual customization controls for zoom, position adjustment, and tilt.
+8. Provide event caption section with editable name placeholder.
+9. Provide one-click caption copy action with success and failure feedback.
 
 ### Deliverables
 
@@ -218,6 +247,10 @@ Give users confidence in the result and a simple way to save it.
 2. Download response behavior and filename strategy.
 3. UX states for loading, success, and failure.
 4. Basic analytics hooks for funnel measurement.
+5. Dedicated customization route UI (for example, `/events/[eventSlug]/customize`).
+6. Zoom, pan, and tilt controls for user photo alignment.
+7. Caption template contract per event (for example, `{{name}}` placeholder support).
+8. Caption editor and copy-to-clipboard interaction.
 
 ### Acceptance Criteria
 
@@ -225,6 +258,11 @@ Give users confidence in the result and a simple way to save it.
 2. The user can preview the final output before or during download.
 3. The downloaded file opens correctly on common devices.
 4. A failed generation attempt can be retried without refreshing the whole site.
+5. The user is redirected or routed into a dedicated customization experience after initial upload selection.
+6. The user can adjust zoom, horizontal or vertical position, and tilt before downloading.
+7. The user can edit their name in the caption template before copying.
+8. The user can copy the generated caption with one action and receives clear copy feedback.
+9. Caption generation works on desktop and mobile with graceful fallback if clipboard access fails.
 
 ### Exit Gate
 
